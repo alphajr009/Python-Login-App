@@ -1,22 +1,31 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-from flask_mysqldb import MySQL
-import MySQLdb.cursors
-import re
-
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
-
-# For Extra Security Change the Secret Key if you want
 app.secret_key = "1a2b3c4d5e6d7g8h9i10"
 
-app.config["MYSQL_HOST"] = "localhost"
-app.config["MYSQL_USER"] = "root"
-app.config["MYSQL_PASSWORD"] = "root"
-app.config["MYSQL_DB"] = "loginapp"
-app.config["MYSQL_PORT"] = 3306
+password = "{@dmin2705!}"
+encoded_password = quote_plus(password)
+
+username = "VpjAdmin@vpj-staging-postgresql"
+encoded_username = quote_plus(username)
+
+app.config[
+    "SQLALCHEMY_DATABASE_URI"
+] = f"postgresql://{encoded_username}:{encoded_password}@vpj-staging-postgresql.postgres.database.azure.com:5432/your_database?sslmode=require"
+print("Connection URL:", app.config["SQLALCHEMY_DATABASE_URI"])
+
+db = SQLAlchemy(app)
 
 
-mysql = MySQL(app)
+# Account model
+class Account(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(255), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
 
 
 # Login
@@ -29,16 +38,13 @@ def login():
     ):
         username = request.form["username"]
         password = request.form["password"]
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute(
-            "SELECT * FROM accounts WHERE username = %s AND password = %s",
-            (username, password),
-        )
-        account = cursor.fetchone()
-        if account:
+
+        account = Account.query.filter_by(username=username).first()
+
+        if account and check_password_hash(account.password, password):
             session["loggedin"] = True
-            session["id"] = account["id"]
-            session["username"] = account["username"]
+            session["id"] = account.id
+            session["username"] = account.username
             return redirect(url_for("home"))
         else:
             flash("Incorrect username/password!", "danger")
@@ -57,25 +63,15 @@ def register():
         username = request.form["username"]
         password = request.form["password"]
         email = request.form["email"]
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute("SELECT * FROM accounts WHERE username LIKE %s", [username])
-        account = cursor.fetchone()
-        if account:
-            flash("Account already exists!", "danger")
-        elif not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-            flash("Invalid email address!", "danger")
-        elif not re.match(r"[A-Za-z0-9]+", username):
-            flash("Username must contain only characters and numbers!", "danger")
-        elif not username or not password or not email:
-            flash("Incorrect username/password!", "danger")
-        else:
-            cursor.execute(
-                "INSERT INTO accounts VALUES (NULL, %s, %s, %s)",
-                (username, email, password),
-            )
-            mysql.connection.commit()
-            flash("You have successfully registered!", "success")
-            return redirect(url_for("login"))
+
+        hashed_password = generate_password_hash(password, method="sha256")
+
+        new_account = Account(username=username, email=email, password=hashed_password)
+        db.session.add(new_account)
+        db.session.commit()
+
+        flash("You have successfully registered!", "success")
+        return redirect(url_for("login"))
 
     elif request.method == "POST":
         flash("Please fill out the form!", "danger")
